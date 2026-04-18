@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ultimate 3D Particle Hand</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: radial-gradient(circle, #000814 0%, #000000 100%); font-family: 'Segoe UI', sans-serif; }
+        #video_container { position: absolute; bottom: 20px; right: 20px; width: 200px; border-radius: 12px; overflow: hidden; border: 2px solid #00f2ff; box-shadow: 0 0 20px #00f2ff; transform: scaleX(-1); z-index: 10; }
+        video { width: 100%; display: block; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #fff; background: rgba(0,0,0,0.7); padding: 20px; border-radius: 15px; border-left: 5px solid #00f2ff; pointer-events: none; z-index: 10; }
+        .cmd { color: #00f2ff; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h2 style="margin:0 0 10px 0">Cosmic Control</h2>
+    <p><span class="cmd">Fist:</span> Golden Saturn</p>
+    <p><span class="cmd">1 Finger:</span> Cinematic Eiffel</p>
+    <p><span class="cmd">2 Fingers:</span> Realistic Earth</p>
+    <p><span class="cmd">3 Fingers:</span> Glowing Xmas Tree</p>
+</div>
+
+<div id="video_container">
+    <video id="input_video"></video>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+// --- CONFIG ---
+const particleCount = 150000;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+camera.position.z = 25;
+
+// --- GEOMETRY DATA ---
+const geometry = new THREE.BufferGeometry();
+const posArray = new Float32Array(particleCount * 3);
+const colArray = new Float32Array(particleCount * 3);
+
+const shapes = {
+    saturn: new Float32Array(particleCount * 3),
+    eiffel: new Float32Array(particleCount * 3),
+    earth: new Float32Array(particleCount * 3),
+    earthCol: new Float32Array(particleCount * 3),
+    xmas: new Float32Array(particleCount * 3),
+    xmasCol: new Float32Array(particleCount * 3)
+};
+
+// --- SHAPE GENERATORS ---
+for (let i = 0; i < particleCount; i++) {
+    const idx = i * 3;
+
+    // 1. SATURN (PERFECT RADIANCE)
+    if (i < particleCount * 0.4) {
+        const phi = Math.acos(-1 + (2 * i) / (particleCount * 0.4));
+        const theta = Math.sqrt(particleCount * 0.4 * Math.PI) * phi;
+        shapes.saturn[idx] = 4 * Math.cos(theta) * Math.sin(phi);
+        shapes.saturn[idx+1] = 4 * Math.sin(theta) * Math.sin(phi);
+        shapes.saturn[idx+2] = 4 * Math.cos(phi);
+    } else {
+        const r = 5.5 + Math.random() * 4.5;
+        const a = Math.random() * Math.PI * 2;
+        shapes.saturn[idx] = Math.cos(a) * r;
+        shapes.saturn[idx+1] = (Math.random() - 0.5) * 0.4;
+        shapes.saturn[idx+2] = Math.sin(a) * r;
+    }
+
+    // 2. EIFFEL (STRUCTURAL DETAIL)
+    const yE = (Math.random() * 20) - 10;
+    const normYE = (yE + 10) / 20;
+    const curve = 5 * Math.exp(-2.8 * normYE);
+    // Platform logic
+    let spread = 0.1;
+    if (Math.abs(normYE - 0.2) < 0.01 || Math.abs(normYE - 0.5) < 0.01) spread = curve; 
+    
+    const pillar = Math.floor(Math.random() * 4);
+    const sX = (pillar < 2 ? 1 : -1) * curve;
+    const sZ = (pillar % 2 === 0 ? 1 : -1) * curve;
+    shapes.eiffel[idx] = sX + (Math.random()-0.5) * spread;
+    shapes.eiffel[idx+1] = yE;
+    shapes.eiffel[idx+2] = sZ + (Math.random()-0.5) * spread;
+
+    // 3. EARTH (ULTRA REALISTIC MAP)
+    const p = Math.acos(-1 + (2 * i) / particleCount);
+    const t = Math.sqrt(particleCount * Math.PI) * p;
+    const rEarth = 7;
+    const ex = rEarth * Math.cos(t) * Math.sin(p);
+    const ey = rEarth * Math.sin(t) * Math.sin(p);
+    const ez = rEarth * Math.cos(p);
+    shapes.earth[idx] = ex; shapes.earth[idx+1] = ey; shapes.earth[idx+2] = ez;
+
+    // Continental Math (Simulating World Map)
+    const noise = Math.sin(ex * 0.4) * Math.cos(ey * 0.4) * Math.sin(ez * 0.4) + Math.sin(ex * 0.8) * Math.sin(ez * 0.8);
+    const c = new THREE.Color();
+    if (Math.abs(ey) > 6.2) c.setHex(0xffffff); // Ice Caps
+    else if (noise > 0.15) c.setHex(0x1a4d1a); // Land
+    else c.setHex(0x001a33); // Deep Ocean
+    shapes.earthCol[idx] = c.r; shapes.earthCol[idx+1] = c.g; shapes.earthCol[idx+2] = c.b;
+
+    // 4. XMAS TREE (GLOWING CONE)
+    const yX = (Math.random() * 16) - 8;
+    const nYX = (yX + 8) / 16;
+    let rX, cX;
+    if (nYX < 0.1) { rX = 0.6; cX = new THREE.Color(0x3d1f05); }
+    else { 
+        rX = (1.1 - nYX) * 6 * (0.8 + Math.sin(yX * 2)*0.2); 
+        cX = Math.random() > 0.98 ? new THREE.Color(0xff0000) : new THREE.Color(0x003300);
+    }
+    shapes.xmas[idx] = (Math.random()-0.5) * rX; shapes.xmas[idx+1] = yX; shapes.xmas[idx+2] = (Math.random()-0.5) * rX;
+    shapes.xmasCol[idx] = cX.r; shapes.xmasCol[idx+1] = cX.g; shapes.xmasCol[idx+2] = cX.b;
+
+    // Set Initial
+    posArray[idx] = shapes.saturn[idx]; posArray[idx+1] = shapes.saturn[idx+1]; posArray[idx+2] = shapes.saturn[idx+2];
+    colArray[idx] = 1; colArray[idx+1] = 0.8; colArray[idx+2] = 0.2;
+}
+
+geometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+geometry.setAttribute('color', new THREE.BufferAttribute(colArray, 3));
+
+// --- MATERIAL WITH SOFT SPHERE TEXTURE ---
+const sprite = new THREE.TextureLoader().load('https://threejs.org/examples/textures/sprites/disc.png');
+const material = new THREE.PointsMaterial({
+    size: 0.08,
+    map: sprite,
+    vertexColors: true,
+    transparent: true,
+    alphaTest: 0.1,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+});
+
+const points = new THREE.Points(geometry, material);
+scene.add(points);
+
+// --- HAND TRACKING ---
+let currentTarget = shapes.saturn;
+let currentTargetCol = null;
+let baseColor = new THREE.Color(0xffd700);
+
+const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7 });
+
+hands.onResults((res) => {
+    if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
+        const pts = res.multiHandLandmarks[0];
+        points.position.x = THREE.MathUtils.lerp(points.position.x, (pts[9].x - 0.5) * -40, 0.1);
+        points.position.y = THREE.MathUtils.lerp(points.position.y, (pts[9].y - 0.5) * -30, 0.1);
+
+        const iU = pts[8].y < pts[6].y - 0.05;
+        const mU = pts[12].y < pts[10].y - 0.05;
+        const rU = pts[16].y < pts[14].y - 0.05;
+
+        if (iU && mU && rU) { currentTarget = shapes.xmas; currentTargetCol = shapes.xmasCol; }
+        else if (iU && mU) { currentTarget = shapes.earth; currentTargetCol = shapes.earthCol; }
+        else if (iU) { currentTarget = shapes.eiffel; currentTargetCol = null; baseColor.setHex(0xffffff); }
+        else { currentTarget = shapes.saturn; currentTargetCol = null; baseColor.setHex(0xffd700); }
+    }
+});
+
+const videoElement = document.getElementById('input_video');
+new Camera(videoElement, { onFrame: async () => { await hands.send({image: videoElement}); }, width: 640, height: 480 }).start();
+
+// --- ANIMATION LOOP ---
+function animate() {
+    requestAnimationFrame(animate);
+    const pos = geometry.attributes.position;
+    const col = geometry.attributes.color;
+
+    for (let i = 0; i < particleCount; i++) {
+        const idx = i * 3;
+        pos.array[idx] += (currentTarget[idx] - pos.array[idx]) * 0.08;
+        pos.array[idx+1] += (currentTarget[idx+1] - pos.array[idx+1]) * 0.08;
+        pos.array[idx+2] += (currentTarget[idx+2] - pos.array[idx+2]) * 0.08;
+
+        if (currentTargetCol) {
+            col.array[idx] += (currentTargetCol[idx] - col.array[idx]) * 0.1;
+            col.array[idx+1] += (currentTargetCol[idx+1] - col.array[idx+1]) * 0.1;
+            col.array[idx+2] += (currentTargetCol[idx+2] - col.array[idx+2]) * 0.1;
+        } else {
+            col.array[idx] += (baseColor.r - col.array[idx]) * 0.1;
+            col.array[idx+1] += (baseColor.g - col.array[idx+1]) * 0.1;
+            col.array[idx+2] += (baseColor.b - col.array[idx+2]) * 0.1;
+        }
+    }
+    pos.needsUpdate = true;
+    col.needsUpdate = true;
+    points.rotation.y += 0.005;
+    renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
